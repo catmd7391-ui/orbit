@@ -1,5 +1,5 @@
 fastapi
-uvicorn[standard]
+uvicorn
 python-multipart
 openpyxl
 python-dotenv
@@ -10,5 +10,3 @@ pypdf
 ollama
 groq
 httpx
-reportlab
-Pillow
