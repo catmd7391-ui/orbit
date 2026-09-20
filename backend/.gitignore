@@ -1,0 +1,11 @@
+.env
+.env.txt
+__pycache__/
+*.pyc
+venv/
+sessions/
+uploads/
+documents/
+rag_store/
+*.log
+*.lock
