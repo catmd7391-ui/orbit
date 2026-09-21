@@ -2,8 +2,8 @@
 """
 LLM brain for Orbit.
 Supports two providers:
-- local: Ollama running on http://localhost:11434
-- groq:  Groq Cloud API (free tier, runs Llama models)
+- groq:  Groq Cloud API (default in production — free tier)
+- local: Ollama running on http://localhost:11434 (for development)
 
 Switch providers by setting LLM_PROVIDER=local or LLM_PROVIDER=groq in .env
 """
@@ -20,7 +20,8 @@ except ImportError:
 # CONFIG
 # ============================================================
 
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "local").lower()
+# Default to groq so cloud deployments work without extra config.
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq").lower()
 
 # --- Ollama (local) ---
 try:
@@ -38,7 +39,8 @@ except ImportError:
     GroqClient = None
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+# Default to a model that exists on Groq for new accounts
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 
 
 # ============================================================
@@ -60,7 +62,7 @@ def _get_groq():
     global _groq_client
     if _groq_client is None and GroqClient is not None:
         if not GROQ_API_KEY:
-            raise RuntimeError("GROQ_API_KEY is not set in .env")
+            raise RuntimeError("GROQ_API_KEY is not set. Add it to .env or Render env vars.")
         _groq_client = GroqClient(api_key=GROQ_API_KEY)
     return _groq_client
 
