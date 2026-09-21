@@ -1,2 +1,39 @@
-.vercel
-.env*
+# Dependencies
+node_modules/
+venv/
+env/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Env files (NEVER commit these)
+.env
+.env.txt
+.env.local
+
+# Runtime data
+sessions/
+uploads/
+documents/
+rag_store/
+*.log
+*.lock
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Build outputs
+dist/
+build/
+
+# Vercel local
+.vercel/
+
+# Nested
+frontend/node_modules/
+backend/venv/
