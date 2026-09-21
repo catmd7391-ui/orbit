@@ -36,15 +36,11 @@ from excel_tool import set_cloud_context
 
 app = FastAPI(title="Orbit Backend", version="10.0")
 
-# ⬇️ CORS updated to allow Vercel + local
+# ⬇️ CORS — permissive for testing (allows any origin)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
-    allow_origin_regex=r"https://.*\.vercel\.app",
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -306,7 +302,6 @@ async def quick_calc_endpoint(session_id: str, message: str = Form(...)):
 
     active = session.get("active_sheet", "Sheet1")
 
-    # ⬇️ Tell excel_tool which session so saves also go to Supabase
     set_cloud_context(session_id, session.get("workbook_name"))
 
     try:
@@ -502,7 +497,6 @@ async def plan_task(
     if message:
         add_message(session_id, "user", message)
 
-    # ⬇️ Set cloud context before any workbook writes
     set_cloud_context(session_id, session.get("workbook_name"))
 
     if file:
@@ -653,7 +647,6 @@ async def approve_plan(permission_id: str):
     print(json.dumps(plan, indent=2, ensure_ascii=False))
     print("WORKBOOK:", session["workbook_path"])
 
-    # ⬇️ Set cloud context before executing
     set_cloud_context(session_id, session.get("workbook_name"))
 
     exec_result = await asyncio.to_thread(
