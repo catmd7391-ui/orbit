@@ -1,0 +1,1 @@
+﻿{"build":{"builder":"NIXPACKS","buildCommand":"pip install -r requirements.txt"},"deploy":{"startCommand":"bash start.sh","restartPolicyType":"ON_FAILURE"}}

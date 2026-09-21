@@ -1,0 +1,12 @@
+﻿fastapi
+uvicorn
+python-multipart
+openpyxl
+python-dotenv
+supabase
+filelock
+requests
+pypdf
+ollama
+groq
+httpx
