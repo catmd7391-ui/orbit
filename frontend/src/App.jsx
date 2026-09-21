@@ -3,8 +3,7 @@ import "./App.css";
 import { supabase } from "./supabaseClient";
 import LoginScreen from "./LoginScreen";
 
-const API_BASE =
-  import.meta.env.VITE_API_BASE || "https://orbit-snbw.onrender.com";
+const API_BASE = "https://orbit-snbw.onrender.com";
 
 // ============================================================
 // TEMPLATES
