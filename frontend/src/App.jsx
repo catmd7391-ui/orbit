@@ -5,7 +5,7 @@ import LoginScreen from "./LoginScreen";
 import TermsScreen from "./TermsScreen";
 import ResetPasswordScreen from "./ResetPasswordScreen";
 
-const API_BASE = "https://orbit-snbw.onrender.com";
+const API_BASE = "https://orbit-xajk.onrender.com";
 
 // ============================================================
 // TEMPLATES
