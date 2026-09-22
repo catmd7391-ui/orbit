@@ -2,6 +2,8 @@ import React, { useState, useRef, useEffect } from "react";
 import "./App.css";
 import { supabase } from "./supabaseClient";
 import LoginScreen from "./LoginScreen";
+import TermsScreen from "./TermsScreen";
+import ResetPasswordScreen from "./ResetPasswordScreen";
 
 const API_BASE = "https://orbit-snbw.onrender.com";
 
@@ -55,12 +57,7 @@ const templates = [
     description: "Track employees, sales, targets and performance.",
     icon: "📈",
     columns: ["Employee", "January Sales", "Target", "Profit", "Status"],
-    rows: [
-      ["", "", "", "", ""],
-      ["", "", "", "", ""],
-      ["", "", "", "", ""],
-      ["", "", "", "", ""],
-    ],
+    rows: [["", "", "", "", ""], ["", "", "", "", ""], ["", "", "", "", ""], ["", "", "", "", ""]],
   },
   {
     id: "employee",
@@ -68,11 +65,7 @@ const templates = [
     description: "Name, ID, designation, salary and department.",
     icon: "👥",
     columns: ["Name", "Employee ID", "Designation", "Department", "Salary"],
-    rows: [
-      ["", "", "", "", ""],
-      ["", "", "", "", ""],
-      ["", "", "", "", ""],
-    ],
+    rows: [["", "", "", "", ""], ["", "", "", "", ""], ["", "", "", "", ""]],
   },
   {
     id: "student",
@@ -80,11 +73,7 @@ const templates = [
     description: "Name, class, marks, roll number and contact.",
     icon: "📚",
     columns: ["Name", "Class", "Roll No", "Marks", "Contact"],
-    rows: [
-      ["", "", "", "", ""],
-      ["", "", "", "", ""],
-      ["", "", "", "", ""],
-    ],
+    rows: [["", "", "", "", ""], ["", "", "", "", ""], ["", "", "", "", ""]],
   },
   {
     id: "invoice",
@@ -92,11 +81,7 @@ const templates = [
     description: "Invoice number, customer, amount, GST and total.",
     icon: "🧾",
     columns: ["Invoice No", "Date", "Customer", "Amount", "GST", "Total"],
-    rows: [
-      ["", "", "", "", "", ""],
-      ["", "", "", "", "", ""],
-      ["", "", "", "", "", ""],
-    ],
+    rows: [["", "", "", "", "", ""], ["", "", "", "", "", ""], ["", "", "", "", "", ""]],
   },
   {
     id: "blank",
@@ -132,14 +117,9 @@ function normalizeSteps(serverSteps, status) {
       detail: step.detail || step.message || "",
     }));
   }
-  if (status === "completed") {
-    return defaultSteps.map((s) => ({ ...s, status: "completed" }));
-  }
+  if (status === "completed") return defaultSteps.map((s) => ({ ...s, status: "completed" }));
   if (status === "error" || status === "failed") {
-    return defaultSteps.map((s, i) => ({
-      ...s,
-      status: i === 0 ? "completed" : i === 1 ? "error" : "idle",
-    }));
+    return defaultSteps.map((s, i) => ({ ...s, status: i === 0 ? "completed" : i === 1 ? "error" : "idle" }));
   }
   return defaultSteps;
 }
@@ -153,9 +133,7 @@ function formatTimeAgo(isoString) {
     if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours ago`;
     if (seconds < 604800) return `${Math.floor(seconds / 86400)} days ago`;
     return date.toLocaleDateString();
-  } catch {
-    return "";
-  }
+  } catch { return ""; }
 }
 
 // ============================================================
@@ -163,13 +141,14 @@ function formatTimeAgo(isoString) {
 // ============================================================
 
 function App() {
-  // ---------------- AUTH ----------------
   const [session, setSession] = useState(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
+  const [acceptedTerms, setAcceptedTerms] = useState(() => {
+    try { return localStorage.getItem("orbit_accepted_terms") === "yes"; } catch { return false; }
+  });
+  const [isResetRoute, setIsResetRoute] = useState(() => window.location.pathname === "/reset-password");
 
-  // ---------------- NAV ----------------
   const [screen, setScreen] = useState("home");
-  const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [excelStartView, setExcelStartView] = useState("home");
 
   const [selectedTemplate, setSelectedTemplate] = useState(null);
@@ -187,61 +166,48 @@ function App() {
   const [workMessage, setWorkMessage] = useState("");
   const [documentInfo, setDocumentInfo] = useState(null);
   const [files, setFiles] = useState([]);
-
   const [pendingPlan, setPendingPlan] = useState(null);
+  const [analysis, setAnalysis] = useState(null);
+  const [analysisOpen, setAnalysisOpen] = useState(false);
 
   const [myWorkOpen, setMyWorkOpen] = useState(false);
   const [myWorkItems, setMyWorkItems] = useState(() => {
-    try {
-      const saved = localStorage.getItem("orbit_my_work");
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
+    try { const saved = localStorage.getItem("orbit_my_work"); return saved ? JSON.parse(saved) : []; } catch { return []; }
+  });
+
+  const [recentFiles, setRecentFiles] = useState(() => {
+    try { const saved = localStorage.getItem("orbit_recent_files"); return saved ? JSON.parse(saved) : []; } catch { return []; }
   });
 
   const [searchQuery, setSearchQuery] = useState("");
-
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [textSize, setTextSize] = useState("medium");
   const [textAlign, setTextAlign] = useState("left");
   const [fullScreen, setFullScreen] = useState(false);
 
+  const [newSheetModalOpen, setNewSheetModalOpen] = useState(false);
+  const [newSheetName, setNewSheetName] = useState("");
+
   const messagesEndRef = useRef(null);
 
-  // ============================================================
-  // AUTH — load session on mount
-  // ============================================================
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session || null);
       setCheckingAuth(false);
     });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event, newSession) => {
-        setSession(newSession);
-      }
-    );
-
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, newSession) => setSession(newSession));
     return () => subscription.unsubscribe();
   }, []);
 
   useEffect(() => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
-    }
+    if (messagesEndRef.current) messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
   }, [messages, processing, pendingPlan]);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem("orbit_my_work", JSON.stringify(myWorkItems));
-    } catch {}
-  }, [myWorkItems]);
+  useEffect(() => { try { localStorage.setItem("orbit_my_work", JSON.stringify(myWorkItems)); } catch {} }, [myWorkItems]);
+  useEffect(() => { try { localStorage.setItem("orbit_recent_files", JSON.stringify(recentFiles)); } catch {} }, [recentFiles]);
+  useEffect(() => { try { localStorage.setItem("orbit_accepted_terms", acceptedTerms ? "yes" : "no"); } catch {} }, [acceptedTerms]);
 
-  // ============================================================
-  // AUTO-LOAD the active sheet when workspace opens with no session
-  // ============================================================
+  // Auto-load sheet when workspace opens
   useEffect(() => {
     if (screen === "excel-workspace" && workbook && !sessionId) {
       (async () => {
@@ -258,12 +224,16 @@ function App() {
           setSessionId(sid);
           if (created.workbook) setWorkbook({ ...created.workbook });
 
-          const activeSheetName = workbook.sheets?.[0] || "Sheet1";
-          const sheetRes = await fetch(
-            `${API_BASE}/excel/session/${sid}/sheet/${encodeURIComponent(
-              activeSheetName
-            )}`
-          );
+          const sheets = created.workbook?.sheets || workbook.sheets || ["Sheet1"];
+          const activeSheetName = sheets[0] || "Sheet1";
+
+          try {
+            const fd = new FormData();
+            fd.append("sheet_name", activeSheetName);
+            await fetch(`${API_BASE}/excel/session/${sid}/set-active-sheet`, { method: "POST", body: fd });
+          } catch (e) { console.error("initial set-active-sheet failed:", e); }
+
+          const sheetRes = await fetch(`${API_BASE}/excel/session/${sid}/sheet/${encodeURIComponent(activeSheetName)}`);
           const data = await sheetRes.json();
           if (data.success) {
             setWorkbook((prev) => ({
@@ -275,20 +245,21 @@ function App() {
             }));
             setActiveSheet(activeSheetName);
           }
-        } catch (e) {
-          console.error("initial sheet load error:", e);
-        }
+
+          // Fetch analysis
+          try {
+            const aRes = await fetch(`${API_BASE}/excel/session/${sid}/analysis`);
+            const aData = await aRes.json();
+            if (aData.success) setAnalysis(aData.analysis);
+          } catch (e) { console.error("analysis fetch failed:", e); }
+        } catch (e) { console.error("initial sheet load error:", e); }
       })();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen, workbook?.id]);
 
-  // ============================================================
-  // AUTH helpers
-  // ============================================================
-  const handleLogin = (newSession) => {
-    setSession(newSession);
-  };
+  const handleLogin = (newSession) => setSession(newSession);
+  const handleAcceptTerms = () => setAcceptedTerms(true);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -300,42 +271,63 @@ function App() {
   };
 
   // ============================================================
-  // MY WORK
+  // RECENT FILES
   // ============================================================
 
-  const saveCurrentToMyWork = () => {
-    if (!workbook) return;
+  const addToRecent = (wb = null, sid = null) => {
+    const target = wb || workbook;
+    if (!target) return;
     const item = {
-      id: `${workbook.id || Date.now()}-${Date.now()}`,
-      name: workbook.name || "Workbook.xlsx",
+      id: `recent-${Date.now()}-${Math.random()}`,
+      name: target.name || "Workbook.xlsx",
+      type: "Excel",
+      icon: "🕒",
+      sheets: target.sheets || ["Sheet1"],
+      workbook: JSON.parse(JSON.stringify(target)),
+      sessionId: sid || sessionId || null,
+      updatedAt: new Date().toISOString(),
+    };
+    setRecentFiles((prev) => {
+      const without = prev.filter((e) => e.name !== item.name);
+      return [item, ...without].slice(0, 20);
+    });
+  };
+
+  // ============================================================
+  // DAILY WORK
+  // ============================================================
+
+  const saveToDailyWork = () => {
+    if (!workbook) return;
+    const trackerName = window.prompt("Name this daily tracker:", workbook.name || "Daily Tracker");
+    if (!trackerName) return;
+
+    const item = {
+      id: `daily-${Date.now()}`,
+      name: trackerName,
       type: "Excel",
       icon: "📅",
       sheets: workbook.sheets || ["Sheet1"],
       workbook: JSON.parse(JSON.stringify(workbook)),
       sessionId,
+      createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
+      isDailyWork: true,
+      uploadCount: 0,
     };
     setMyWorkItems((prev) => {
-      const withoutSameName = prev.filter((e) => e.name !== item.name);
-      return [item, ...withoutSameName];
+      const without = prev.filter((e) => e.name !== item.name);
+      return [item, ...without];
     });
-    setWorkMessage(`Saved ${item.name} to Daily Work.`);
+    setWorkMessage(`Saved ${trackerName} to Daily Work.`);
     setWorkStatus("saved");
-    setMessages((prev) => [
-      ...prev,
-      { role: "assistant", text: `💾 Saved "${item.name}" to Daily Work.` },
-    ]);
+    setMessages((prev) => [...prev, { role: "assistant", text: `📅 Saved "${trackerName}" to Daily Work.` }]);
   };
 
   const openMyWorkItem = (item) => {
     if (item.type === "Excel" && item.workbook) {
       setWorkbook({ ...item.workbook });
-      setSelectedTemplate({
-        id: "saved",
-        name: item.name,
-        description: "Saved in Daily Work.",
-        icon: "📅",
-      });
+      setSelectedTemplate({ id: "saved", name: item.name, description: "Saved in Daily Work.", icon: "📅" });
       setSessionId(item.sessionId || null);
       setActiveSheet(item.workbook.sheets?.[0] || "Sheet1");
       setMessages([]);
@@ -345,22 +337,13 @@ function App() {
     }
   };
 
-  const deleteMyWorkItem = (id) => {
-    setMyWorkItems((prev) => prev.filter((item) => item.id !== id));
-  };
+  const deleteMyWorkItem = (id) => setMyWorkItems((prev) => prev.filter((item) => item.id !== id));
 
   // ============================================================
   // NAV
   // ============================================================
 
-  const login = () => setScreen("terms");
-  const acceptTerms = () => {
-    if (acceptedTerms) setScreen("home");
-  };
-  const openExcel = () => {
-    setExcelStartView("home");
-    setScreen("excel");
-  };
+  const openExcel = () => { setExcelStartView("home"); setScreen("excel"); };
 
   const makeLocalWorkbook = (source) => ({
     id: Date.now(),
@@ -386,23 +369,19 @@ function App() {
     setAttachedFile(null);
     setPendingPlan(null);
     setActiveSheet("Sheet1");
+    setAnalysis(null);
+    addToRecent(localWorkbook, null);
     setScreen("excel-chat");
   };
 
   const createBlankWorkbook = () => selectWorkbook(blankTemplate);
-
-  const handleTemplateClick = (template) => {
-    selectWorkbook(template);
-  };
+  const handleTemplateClick = (template) => selectWorkbook(template);
 
   const handleOpenUpload = (event) => {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
-    if (file.size === 0) {
-      alert("The selected file is empty.");
-      return;
-    }
+    if (file.size === 0) { alert("The selected file is empty."); return; }
 
     const temporaryWorkbook = {
       id: Date.now(),
@@ -413,17 +392,10 @@ function App() {
       sheets: ["Sheet1"],
     };
 
-    setSelectedTemplate({
-      id: "existing",
-      name: file.name,
-      description: "Uploaded file.",
-      icon: "📂",
-    });
+    setSelectedTemplate({ id: "existing", name: file.name, description: "Uploaded file.", icon: "📂" });
     setWorkbook(temporaryWorkbook);
     setAttachedFile(file);
-    setFiles([
-      { name: file.name, type: file.type || "Document", size: file.size },
-    ]);
+    setFiles([{ name: file.name, type: file.type || "Document", size: file.size }]);
     setSessionId(null);
     setMessages([]);
     setWorkSteps(defaultSteps);
@@ -431,6 +403,8 @@ function App() {
     setWorkMessage("");
     setPendingPlan(null);
     setActiveSheet("Sheet1");
+    setAnalysis(null);
+    addToRecent(temporaryWorkbook, null);
     setScreen("excel-chat");
   };
 
@@ -440,23 +414,13 @@ function App() {
 
   const applyServerData = (data) => {
     if (data.workbook) setWorkbook({ ...data.workbook });
-    if (data.document_analysis || data.document) {
-      setDocumentInfo(data.document_analysis || data.document);
-    }
+    if (data.document_analysis || data.document) setDocumentInfo(data.document_analysis || data.document);
     if (Array.isArray(data.files)) setFiles(data.files);
     const actualStatus = data.status || (data.success === false ? "error" : "completed");
     setWorkStatus(actualStatus);
-    setWorkMessage(
-      data.message ||
-        (data.success === false
-          ? "Orbit could not complete the requested task."
-          : "Orbit completed the requested task.")
-    );
+    setWorkMessage(data.message || (data.success === false ? "Orbit could not complete the requested task." : "Orbit completed the requested task."));
     setWorkSteps(normalizeSteps(data.steps, actualStatus));
-
-    if (data.workbook && data.workbook.active_sheet) {
-      setActiveSheet(data.workbook.active_sheet);
-    }
+    if (data.workbook && data.workbook.active_sheet) setActiveSheet(data.workbook.active_sheet);
   };
 
   const reloadWorkbook = async () => {
@@ -466,17 +430,23 @@ function App() {
       const data = await res.json();
       if (data.workbook) {
         const stillExists = (data.workbook.sheets || []).includes(activeSheet);
-        const targetSheet = stillExists
-          ? activeSheet
-          : data.workbook.sheets?.[0] || "Sheet1";
+        const targetSheet = stillExists ? activeSheet : data.workbook.sheets?.[0] || "Sheet1";
         setWorkbook({ ...data.workbook });
         setActiveSheet(targetSheet);
         return data.workbook;
       }
-    } catch (e) {
-      console.error("reloadWorkbook error:", e);
-    }
+    } catch (e) { console.error("reloadWorkbook error:", e); }
     return null;
+  };
+
+  const refreshAnalysis = async (sid = null) => {
+    const target = sid || sessionId;
+    if (!target) return;
+    try {
+      const res = await fetch(`${API_BASE}/excel/session/${target}/analysis`);
+      const data = await res.json();
+      if (data.success) setAnalysis(data.analysis);
+    } catch (e) { console.error("refreshAnalysis error:", e); }
   };
 
   // ============================================================
@@ -484,26 +454,27 @@ function App() {
   // ============================================================
 
   const switchSheet = async (sheetName) => {
+    console.log(`🔄 Switching to sheet: ${sheetName}`);
     setActiveSheet(sheetName);
 
     let activeSession = sessionId;
     if (!activeSession) {
-      try {
-        activeSession = await ensureSession();
-      } catch (e) {
-        console.error("switchSheet ensureSession failed:", e);
-        return;
-      }
+      try { activeSession = await ensureSession(); }
+      catch (e) { console.error("switchSheet ensureSession failed:", e); return; }
     }
 
     try {
-      const res = await fetch(
-        `${API_BASE}/excel/session/${activeSession}/sheet/${encodeURIComponent(
-          sheetName
-        )}`
-      );
-      const data = await res.json();
+      const fd = new FormData();
+      fd.append("sheet_name", sheetName);
+      const saveRes = await fetch(`${API_BASE}/excel/session/${activeSession}/set-active-sheet`, { method: "POST", body: fd });
+      const saveData = await saveRes.json();
+      console.log("✅ Backend active sheet:", saveData);
+    } catch (e) { console.error("❌ set-active-sheet failed:", e); }
 
+    try {
+      const res = await fetch(`${API_BASE}/excel/session/${activeSession}/sheet/${encodeURIComponent(sheetName)}`);
+      const data = await res.json();
+      console.log("📊 Sheet data loaded:", { sheet: sheetName, success: data.success, rows: data.rows?.length });
       if (data.success) {
         setWorkbook((prev) => ({
           ...(prev || {}),
@@ -512,12 +483,12 @@ function App() {
           sheets: data.sheets || prev?.sheets || ["Sheet1"],
           active_sheet: sheetName,
         }));
+        setActiveSheet(sheetName);
+        refreshAnalysis(activeSession);
       } else {
-        console.error("switchSheet failed:", data.error);
+        console.error("❌ switchSheet failed:", data.error);
       }
-    } catch (e) {
-      console.error("switchSheet error:", e);
-    }
+    } catch (e) { console.error("❌ switchSheet error:", e); }
   };
 
   const ensureSession = async () => {
@@ -541,21 +512,14 @@ function App() {
     const cleanInput = input.trim();
     if (!cleanInput && !attachedFile) return;
     if (!workbook) {
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", text: "Please select a workbook first." },
-      ]);
+      setMessages((prev) => [...prev, { role: "assistant", text: "Please select a workbook first." }]);
       return;
     }
 
     const currentFile = attachedFile;
     const userText = cleanInput || "Please process the attached file.";
 
-    setMessages((prev) => [
-      ...prev,
-      { role: "user", text: userText, file: currentFile ? currentFile.name : null },
-    ]);
-
+    setMessages((prev) => [...prev, { role: "user", text: userText, file: currentFile ? currentFile.name : null }]);
     setInput("");
     setAttachedFile(null);
     setProcessing(true);
@@ -564,13 +528,7 @@ function App() {
     setPendingPlan(null);
 
     if (screen === "excel-chat") setScreen("excel-workspace");
-
-    setWorkSteps(
-      defaultSteps.map((step, index) => ({
-        ...step,
-        status: index === 0 ? "active" : "idle",
-      }))
-    );
+    setWorkSteps(defaultSteps.map((step, index) => ({ ...step, status: index === 0 ? "active" : "idle" })));
 
     try {
       const activeSessionId = await ensureSession();
@@ -578,54 +536,30 @@ function App() {
       formData.append("message", userText);
       if (currentFile && currentFile.size > 0) formData.append("file", currentFile);
 
-      const response = await fetch(
-        `${API_BASE}/excel/session/${activeSessionId}/plan`,
-        { method: "POST", body: formData }
-      );
+      const response = await fetch(`${API_BASE}/excel/session/${activeSessionId}/plan`, { method: "POST", body: formData });
       if (!response.ok) throw new Error(`Backend returned ${response.status}`);
 
       const data = await response.json();
       console.log("Orbit response:", data);
 
       if (data.already_satisfied) {
-        setMessages((prev) => [
-          ...prev,
-          { role: "assistant", text: data.summary || "Already done." },
-        ]);
+        setMessages((prev) => [...prev, { role: "assistant", text: data.summary || "Already done." }]);
         setWorkStatus("completed");
       } else if (data.permission_required) {
-        setPendingPlan({
-          permissionId: data.permission_id,
-          summary: data.summary,
-          plan: data.plan,
-        });
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: "assistant",
-            text:
-              "I prepared a plan:\n\n" +
-              data.summary +
-              "\n\nApprove to continue.",
-          },
-        ]);
+        setPendingPlan({ permissionId: data.permission_id, summary: data.summary, plan: data.plan });
+        setMessages((prev) => [...prev, { role: "assistant", text: "I prepared a plan:\n\n" + data.summary + "\n\nApprove to continue." }]);
         setWorkStatus("awaiting_permission");
         setWorkMessage("Waiting for your approval.");
       } else {
         applyServerData(data);
-        setMessages((prev) => [
-          ...prev,
-          { role: "assistant", text: data.message || "Done." },
-        ]);
+        setMessages((prev) => [...prev, { role: "assistant", text: data.message || "Done." }]);
+        refreshAnalysis(activeSessionId);
       }
     } catch (error) {
       console.error(error);
       setWorkStatus("error");
       setWorkMessage(error.message || "Orbit could not process the request.");
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", text: "I couldn't connect to the backend." },
-      ]);
+      setMessages((prev) => [...prev, { role: "assistant", text: "I couldn't connect to the backend." }]);
     } finally {
       setProcessing(false);
     }
@@ -635,63 +569,39 @@ function App() {
     if (!pendingPlan) return;
     setProcessing(true);
     try {
-      const res = await fetch(
-        `${API_BASE}/excel/permission/${pendingPlan.permissionId}/approve`,
-        { method: "POST" }
-      );
+      const res = await fetch(`${API_BASE}/excel/permission/${pendingPlan.permissionId}/approve`, { method: "POST" });
       const data = await res.json();
       applyServerData(data);
       setPendingPlan(null);
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", text: data.message || "Approved and executed." },
-      ]);
+      setMessages((prev) => [...prev, { role: "assistant", text: data.message || "Approved and executed." }]);
 
       if (data.workbook) {
         const sheets = data.workbook.sheets || [];
         const lastSheet = sheets[sheets.length - 1];
-        if (lastSheet && lastSheet !== activeSheet) {
-          await switchSheet(lastSheet);
-        }
+        if (lastSheet && lastSheet !== activeSheet) await switchSheet(lastSheet);
       }
+      if (sessionId) refreshAnalysis(sessionId);
     } catch (e) {
       console.error(e);
       setWorkStatus("error");
       setWorkMessage("Approval failed.");
-    } finally {
-      setProcessing(false);
-    }
+    } finally { setProcessing(false); }
   };
 
   const rejectPlan = async () => {
     if (!pendingPlan) return;
     try {
-      await fetch(
-        `${API_BASE}/excel/permission/${pendingPlan.permissionId}/reject`,
-        { method: "POST" }
-      );
-    } catch (e) {
-      console.error(e);
-    }
+      await fetch(`${API_BASE}/excel/permission/${pendingPlan.permissionId}/reject`, { method: "POST" });
+    } catch (e) { console.error(e); }
     setPendingPlan(null);
     setWorkStatus("ready");
     setWorkMessage("Plan rejected. Nothing was changed.");
-    setMessages((prev) => [
-      ...prev,
-      { role: "assistant", text: "You rejected the plan. Nothing was changed." },
-    ]);
+    setMessages((prev) => [...prev, { role: "assistant", text: "You rejected the plan. Nothing was changed." }]);
   };
 
   const downloadWorkbook = async () => {
     let activeSession = sessionId;
-    if (!activeSession) {
-      try {
-        activeSession = await ensureSession();
-      } catch (e) {
-        alert("Could not start a session. Please try again.");
-        return;
-      }
-    }
+    if (!activeSession) { try { activeSession = await ensureSession(); } catch (e) { alert("Could not start a session. Please try again."); return; } }
     const url = `${API_BASE}/excel/session/${activeSession}/download`;
     const a = document.createElement("a");
     a.href = url;
@@ -703,19 +613,9 @@ function App() {
 
   const saveToCompanyFolder = async () => {
     let activeSession = sessionId;
-    if (!activeSession) {
-      try {
-        activeSession = await ensureSession();
-      } catch (e) {
-        alert("Could not start a session. Please try again.");
-        return;
-      }
-    }
+    if (!activeSession) { try { activeSession = await ensureSession(); } catch (e) { alert("Could not start a session. Please try again."); return; } }
 
-    const folder = window.prompt(
-      "Save to folder (Finance / HR / Projects / Reports / Data):",
-      "Finance"
-    );
+    const folder = window.prompt("Save to folder (Finance / HR / Projects / Reports / Data):", "Finance");
     if (!folder) return;
     const filename = window.prompt("File name:", workbook?.name || "Orbit.xlsx");
     if (!filename) return;
@@ -724,100 +624,55 @@ function App() {
       const formData = new FormData();
       formData.append("folder", folder);
       formData.append("filename", filename);
-      const res = await fetch(
-        `${API_BASE}/excel/session/${activeSession}/save-to-folder`,
-        { method: "POST", body: formData }
-      );
+      const res = await fetch(`${API_BASE}/excel/session/${activeSession}/save-to-folder`, { method: "POST", body: formData });
       const data = await res.json();
-      if (data.success) {
-        setMessages((prev) => [
-          ...prev,
-          { role: "assistant", text: `✅ Saved to ${folder}/${filename}` },
-        ]);
-      } else {
-        alert("Save failed: " + (data.error || "unknown"));
-      }
-    } catch (e) {
-      console.error(e);
-      alert("Save failed.");
-    }
+      if (data.success) setMessages((prev) => [...prev, { role: "assistant", text: `✅ Saved to ${folder}/${filename}` }]);
+      else alert("Save failed: " + (data.error || "unknown"));
+    } catch (e) { console.error(e); alert("Save failed."); }
   };
 
-  // ============================================================
-  // CREATE NEW SHEET
-  // ============================================================
-
-  const createNewSheet = async () => {
-    let activeSession = sessionId;
-    if (!activeSession) {
-      try {
-        activeSession = await ensureSession();
-      } catch (e) {
-        console.error(e);
-        alert("Could not start a session. Please try again.");
-        return;
-      }
-    }
-
+  const openNewSheetModal = () => {
     const existing = workbook?.sheets || ["Sheet1"];
-    const name = window.prompt(
-      "Enter new sheet name:",
-      `Sheet${existing.length + 1}`
-    );
-    if (!name) return;
+    setNewSheetName(`Sheet${existing.length + 1}`);
+    setNewSheetModalOpen(true);
+  };
 
+  const confirmCreateSheet = async () => {
+    const name = newSheetName.trim();
+    if (!name) { alert("Please enter a sheet name."); return; }
+
+    setNewSheetModalOpen(false);
     setProcessing(true);
+
+    let activeSession = sessionId;
+    if (!activeSession) { try { activeSession = await ensureSession(); } catch (e) { console.error(e); alert("Could not start a session. Please try again."); setProcessing(false); return; } }
 
     try {
       const fd = new FormData();
       fd.append("message", `Create a new sheet called "${name}"`);
-
-      const planRes = await fetch(
-        `${API_BASE}/excel/session/${activeSession}/plan`,
-        { method: "POST", body: fd }
-      );
+      const planRes = await fetch(`${API_BASE}/excel/session/${activeSession}/plan`, { method: "POST", body: fd });
       const planData = await planRes.json();
 
       if (planData.permission_required) {
-        await fetch(
-          `${API_BASE}/excel/permission/${planData.permission_id}/approve`,
-          { method: "POST" }
-        );
+        await fetch(`${API_BASE}/excel/permission/${planData.permission_id}/approve`, { method: "POST" });
       }
 
       await reloadWorkbook();
       await switchSheet(name);
 
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", text: `✅ Created sheet '${name}'.` },
-      ]);
-    } catch (e) {
-      console.error(e);
-      alert("Could not create sheet.");
-    } finally {
-      setProcessing(false);
-    }
+      setMessages((prev) => [...prev, { role: "assistant", text: `✅ Created sheet "${name}".\n\nYou are now working on **${name}**.` }]);
+    } catch (e) { console.error(e); alert("Could not create sheet."); }
+    finally { setProcessing(false); }
   };
 
   const handleChatFile = (event) => {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
-    if (file.size === 0) {
-      alert("The selected file is empty.");
-      return;
-    }
+    if (file.size === 0) { alert("The selected file is empty."); return; }
     setAttachedFile(file);
-    setFiles((prev) => [
-      ...prev.filter((item) => item.name !== file.name),
-      { name: file.name, type: file.type || "Document", size: file.size },
-    ]);
+    setFiles((prev) => [...prev.filter((item) => item.name !== file.name), { name: file.name, type: file.type || "Document", size: file.size }]);
   };
-
-  // ============================================================
-  // GO BACK / NEW CHAT
-  // ============================================================
 
   const goBackToExcel = () => {
     setScreen("excel");
@@ -839,6 +694,7 @@ function App() {
     setPendingPlan(null);
     setFullScreen(false);
     setProcessing(false);
+    setAnalysis(null);
   };
 
   const startNewChat = () => {
@@ -861,6 +717,7 @@ function App() {
     setPendingPlan(null);
     setFullScreen(false);
     setProcessing(false);
+    setAnalysis(null);
   };
 
   // ============================================================
@@ -876,9 +733,7 @@ function App() {
         </div>
         <div className="header-user">
           <span>{session?.user?.email || "Workspace"}</span>
-          <button className="logout-button" onClick={handleLogout}>
-            Sign out
-          </button>
+          <button className="logout-button" onClick={handleLogout}>Sign out</button>
           <div className="avatar">N</div>
         </div>
       </header>
@@ -918,12 +773,9 @@ function App() {
 
   const renderExcelStart = () => {
     const userHour = new Date().getHours();
-    const greeting =
-      userHour < 12 ? "Good morning" : userHour < 18 ? "Good afternoon" : "Good evening";
-
-    const filtered = myWorkItems.filter((item) =>
-      item.name.toLowerCase().includes(searchQuery.toLowerCase())
-    );
+    const greeting = userHour < 12 ? "Good morning" : userHour < 18 ? "Good afternoon" : "Good evening";
+    const filtered = myWorkItems.filter((item) => item.name.toLowerCase().includes(searchQuery.toLowerCase()));
+    const filteredRecent = recentFiles.filter((item) => item.name.toLowerCase().includes(searchQuery.toLowerCase()));
 
     return (
       <div className="excel-start-screen">
@@ -932,42 +784,20 @@ function App() {
             <div className="brand-mark small">X</div>
             <strong>Excel</strong>
           </div>
-
           <nav className="start-nav">
-            <button
-              className={`start-nav-item ${excelStartView === "home" ? "active" : ""}`}
-              onClick={() => setExcelStartView("home")}
-            >
-              <span>🏠</span>
-              <span>Home</span>
+            <button className={`start-nav-item ${excelStartView === "home" ? "active" : ""}`} onClick={() => setExcelStartView("home")}>
+              <span>🏠</span><span>Home</span>
             </button>
-
-            <button
-              className={`start-nav-item ${excelStartView === "new" ? "active" : ""}`}
-              onClick={() => setExcelStartView("new")}
-            >
-              <span>📄</span>
-              <span>New</span>
+            <button className={`start-nav-item ${excelStartView === "new" ? "active" : ""}`} onClick={() => setExcelStartView("new")}>
+              <span>📄</span><span>New</span>
             </button>
-
-            <button
-              className={`start-nav-item ${excelStartView === "open" ? "active" : ""}`}
-              onClick={() => setExcelStartView("open")}
-            >
-              <span>📂</span>
-              <span>Open</span>
+            <button className={`start-nav-item ${excelStartView === "open" ? "active" : ""}`} onClick={() => setExcelStartView("open")}>
+              <span>📂</span><span>Open</span>
             </button>
           </nav>
-
           <div className="start-sidebar-bottom">
-            <button className="start-nav-item">
-              <span>👤</span>
-              <span>Account</span>
-            </button>
-            <button className="start-nav-item">
-              <span>⚙️</span>
-              <span>Options</span>
-            </button>
+            <button className="start-nav-item" onClick={() => setScreen("account")}><span>👤</span><span>Account</span></button>
+            <button className="start-nav-item" onClick={() => setOptionsOpen(true)}><span>⚙️</span><span>Options</span></button>
           </div>
         </aside>
 
@@ -1005,50 +835,56 @@ function App() {
               <section className="start-section">
                 <div className="start-search">
                   <span>🔍</span>
-                  <input
-                    type="text"
-                    placeholder="Search for a file"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                  />
+                  <input type="text" placeholder="Search for a file" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
                 </div>
               </section>
 
               <section className="start-section">
                 <div className="daily-work-title-row">
                   <h2>📅 Daily Work</h2>
-                  <span className="daily-work-subtitle">
-                    Your recurring workbooks. Orbit keeps them updated as you upload.
-                  </span>
+                  <span className="daily-work-subtitle">Your recurring workbooks. Orbit keeps them updated as you upload.</span>
                 </div>
-
                 <div className="start-recent-list">
                   {filtered.length === 0 ? (
                     <div className="start-empty">
                       <p>No daily work yet.</p>
-                      <p>
-                        Create a <strong>Blank workbook</strong> or{" "}
-                        <strong>upload your existing Excel</strong> to get started.
-                      </p>
+                      <p>Create a <strong>Blank workbook</strong> or <strong>upload your existing Excel</strong> to get started.</p>
                     </div>
                   ) : (
                     filtered.map((item) => (
-                      <button
-                        key={item.id}
-                        className="start-recent-item daily-work-item"
-                        onClick={() => openMyWorkItem(item)}
-                      >
+                      <button key={item.id} className="start-recent-item daily-work-item" onClick={() => openMyWorkItem(item)}>
                         <div className="start-recent-icon">📅</div>
                         <div className="start-recent-details">
                           <strong>{item.name}</strong>
                           <span className="daily-work-meta">
-                            {item.sheets?.length || 1} sheet(s) ·{" "}
-                            {item.updatedAt
-                              ? `last used ${formatTimeAgo(item.updatedAt)}`
-                              : "new"}
+                            {item.sheets?.length || 1} sheet(s) · {item.updatedAt ? `last used ${formatTimeAgo(item.updatedAt)}` : "new"}
                           </span>
                         </div>
                         <span className="daily-work-badge">Daily</span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </section>
+
+              <section className="start-section">
+                <div className="daily-work-title-row">
+                  <h2>🕒 Recent Files</h2>
+                  <span className="daily-work-subtitle">Workbooks you opened recently.</span>
+                </div>
+                <div className="start-recent-list">
+                  {filteredRecent.length === 0 ? (
+                    <div className="start-empty"><p>No recent files yet.</p></div>
+                  ) : (
+                    filteredRecent.map((item) => (
+                      <button key={item.id} className="start-recent-item daily-work-item" onClick={() => openMyWorkItem(item)}>
+                        <div className="start-recent-icon">🕒</div>
+                        <div className="start-recent-details">
+                          <strong>{item.name}</strong>
+                          <span className="daily-work-meta">
+                            {item.sheets?.length || 1} sheet(s) · {item.updatedAt ? formatTimeAgo(item.updatedAt) : "new"}
+                          </span>
+                        </div>
                       </button>
                     ))
                   )}
@@ -1064,16 +900,11 @@ function App() {
                 <h1>New</h1>
                 <div className="avatar">N</div>
               </header>
-
               <section className="start-section">
                 <h2>Templates</h2>
                 <div className="template-grid">
                   {templates.map((template) => (
-                    <button
-                      key={template.id}
-                      className="template-card"
-                      onClick={() => handleTemplateClick(template)}
-                    >
+                    <button key={template.id} className="template-card" onClick={() => handleTemplateClick(template)}>
                       <div className="template-icon">{template.icon}</div>
                       <h3>{template.name}</h3>
                       <p>{template.description}</p>
@@ -1092,52 +923,33 @@ function App() {
                 <h1>Open</h1>
                 <div className="avatar">N</div>
               </header>
-
               <section className="start-section">
                 <label className="start-upload">
                   <div className="start-upload-icon">📂</div>
                   <div className="start-upload-title">Click to upload a file</div>
                   <div className="start-upload-hint">PDF · XLSX · XLS · CSV · DOCX · PNG · JPG</div>
                   <div className="start-upload-button">Choose file</div>
-                  <input
-                    type="file"
-                    accept=".pdf,.xlsx,.xls,.csv,.docx,.doc,.txt,.png,.jpg,.jpeg"
-                    onChange={handleOpenUpload}
-                  />
+                  <input type="file" accept=".pdf,.xlsx,.xls,.csv,.docx,.doc,.txt,.png,.jpg,.jpeg" onChange={handleOpenUpload} />
                 </label>
               </section>
-
               <section className="start-section">
                 <div className="daily-work-title-row">
-                  <h2>📅 Daily Work</h2>
-                  <span className="daily-work-subtitle">
-                    Your recurring workbooks. Orbit keeps them updated as you upload.
-                  </span>
+                  <h2>🕒 Recent Files</h2>
+                  <span className="daily-work-subtitle">Workbooks you opened recently.</span>
                 </div>
-
                 <div className="start-recent-list">
-                  {filtered.length === 0 ? (
-                    <div className="start-empty">
-                      <p>No daily work yet.</p>
-                    </div>
+                  {filteredRecent.length === 0 ? (
+                    <div className="start-empty"><p>No recent files yet.</p></div>
                   ) : (
-                    filtered.map((item) => (
-                      <button
-                        key={item.id}
-                        className="start-recent-item daily-work-item"
-                        onClick={() => openMyWorkItem(item)}
-                      >
-                        <div className="start-recent-icon">📅</div>
+                    filteredRecent.map((item) => (
+                      <button key={item.id} className="start-recent-item daily-work-item" onClick={() => openMyWorkItem(item)}>
+                        <div className="start-recent-icon">🕒</div>
                         <div className="start-recent-details">
                           <strong>{item.name}</strong>
                           <span className="daily-work-meta">
-                            {item.sheets?.length || 1} sheet(s) ·{" "}
-                            {item.updatedAt
-                              ? `last used ${formatTimeAgo(item.updatedAt)}`
-                              : "new"}
+                            {item.sheets?.length || 1} sheet(s) · {item.updatedAt ? formatTimeAgo(item.updatedAt) : "new"}
                           </span>
                         </div>
-                        <span className="daily-work-badge">Daily</span>
                       </button>
                     ))
                   )}
@@ -1146,9 +958,61 @@ function App() {
             </>
           )}
         </main>
+
+        {optionsOpen && (
+          <div className="options-overlay" onClick={() => setOptionsOpen(false)}>
+            <aside className="options-drawer" onClick={(e) => e.stopPropagation()}>
+              <div className="options-header">
+                <strong>Options</strong>
+                <button onClick={() => setOptionsOpen(false)}>×</button>
+              </div>
+              <div className="options-group">
+                <span className="options-label">Text size</span>
+                <div className="options-row">
+                  <button className={textSize === "small" ? "active" : ""} onClick={() => setTextSize("small")}>S</button>
+                  <button className={textSize === "medium" ? "active" : ""} onClick={() => setTextSize("medium")}>M</button>
+                  <button className={textSize === "large" ? "active" : ""} onClick={() => setTextSize("large")}>L</button>
+                </div>
+              </div>
+              <div className="options-group">
+                <span className="options-label">Align</span>
+                <div className="options-row">
+                  <button className={textAlign === "left" ? "active" : ""} onClick={() => setTextAlign("left")}>⬅</button>
+                  <button className={textAlign === "center" ? "active" : ""} onClick={() => setTextAlign("center")}>↔</button>
+                  <button className={textAlign === "right" ? "active" : ""} onClick={() => setTextAlign("right")}>➡</button>
+                </div>
+              </div>
+            </aside>
+          </div>
+        )}
       </div>
     );
   };
+
+  // ============================================================
+  // SCREEN: ACCOUNT
+  // ============================================================
+
+  const renderAccount = () => (
+    <div className="app-page">
+      <header className="top-header">
+        <div className="brand-line">
+          <button className="back-button" onClick={() => setScreen("excel")} title="Back">←</button>
+          <div className="brand-mark small">O</div>
+          <strong>Account</strong>
+        </div>
+        <div className="header-user"><div className="avatar">N</div></div>
+      </header>
+      <main className="home-content">
+        <div className="home-heading">
+          <p className="eyebrow">YOUR ACCOUNT</p>
+          <h1>{session?.user?.email || "Guest"}</h1>
+          <p>Signed in with Supabase Auth</p>
+          <button className="logout-button" onClick={handleLogout}>Sign out</button>
+        </div>
+      </main>
+    </div>
+  );
 
   // ============================================================
   // SCREEN: CHAT
@@ -1180,8 +1044,7 @@ function App() {
           </div>
           {attachedFile && (
             <div className="simple-file-chip">
-              <span>📎</span>
-              <span>{attachedFile.name}</span>
+              <span>📎</span><span>{attachedFile.name}</span>
               <button onClick={() => setAttachedFile(null)}>×</button>
             </div>
           )}
@@ -1189,12 +1052,7 @@ function App() {
             className="simple-prompt"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                sendMessage();
-              }
-            }}
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
             placeholder="What do you want Orbit to do?"
           />
           <div className="simple-actions">
@@ -1210,10 +1068,6 @@ function App() {
       </main>
     </div>
   );
-
-  // ============================================================
-  // MESSAGES + INPUT
-  // ============================================================
 
   const renderMessages = () => (
     <div className="chatbot-messages">
@@ -1248,9 +1102,7 @@ function App() {
       {processing && (
         <div className="chatbot-row">
           <div className="message-avatar">O</div>
-          <div className="assistant-bubble processing-message">
-            <span /><span /><span />
-          </div>
+          <div className="assistant-bubble processing-message"><span /><span /><span /></div>
         </div>
       )}
       <div ref={messagesEndRef} />
@@ -1261,8 +1113,7 @@ function App() {
     <div className="chatbot-input-area">
       {attachedFile && (
         <div className="selected-file">
-          <span>📎</span>
-          <span>{attachedFile.name}</span>
+          <span>📎</span><span>{attachedFile.name}</span>
           <button onClick={() => setAttachedFile(null)}>×</button>
         </div>
       )}
@@ -1274,12 +1125,7 @@ function App() {
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              sendMessage();
-            }
-          }}
+          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
           placeholder="Tell Orbit what you want to do..."
           disabled={processing}
           rows={1}
@@ -1306,9 +1152,12 @@ function App() {
         <div className="workbook-toolbar">
           <div className="workbook-title">
             <span className="excel-mini-icon">X</span>
-            <div>
-              <strong>{workbook.name}</strong>
-            </div>
+            <div><strong>{workbook.name}</strong></div>
+          </div>
+          <div className="active-sheet-indicator">
+            <span className="active-sheet-dot">●</span>
+            <span>Working on:</span>
+            <strong>{activeSheet}</strong>
           </div>
         </div>
 
@@ -1317,27 +1166,21 @@ function App() {
             <thead>
               <tr>
                 <th className="row-number-header"></th>
-                {columns.map((column, index) => (
-                  <th key={index}>{column}</th>
-                ))}
+                {columns.map((column, index) => <th key={index}>{column}</th>)}
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 ? (
                 <tr>
                   <td className="row-number">1</td>
-                  {columns.map((_, columnIndex) => (
-                    <td key={columnIndex} className="read-only-cell"></td>
-                  ))}
+                  {columns.map((_, columnIndex) => <td key={columnIndex} className="read-only-cell"></td>)}
                 </tr>
               ) : (
                 rows.map((row, rowIndex) => (
                   <tr key={rowIndex}>
                     <td className="row-number">{rowIndex + 1}</td>
                     {columns.map((_, columnIndex) => (
-                      <td key={columnIndex} className="read-only-cell">
-                        {row[columnIndex] ?? ""}
-                      </td>
+                      <td key={columnIndex} className="read-only-cell">{row[columnIndex] ?? ""}</td>
                     ))}
                   </tr>
                 ))
@@ -1348,15 +1191,11 @@ function App() {
 
         <div className="sheet-tabs">
           {sheets.map((sheet) => (
-            <button
-              key={sheet}
-              className={activeSheet === sheet ? "active-sheet" : ""}
-              onClick={() => switchSheet(sheet)}
-            >
+            <button key={sheet} className={activeSheet === sheet ? "active-sheet" : ""} onClick={() => switchSheet(sheet)}>
               {sheet}
             </button>
           ))}
-          <button className="add-sheet-button" onClick={createNewSheet} title="Add new sheet">＋</button>
+          <button className="add-sheet-button" onClick={openNewSheetModal} title="Add new sheet">＋</button>
         </div>
 
         <div className="status-bar">
@@ -1385,19 +1224,12 @@ function App() {
             </div>
             <button className="my-work-close" onClick={() => setMyWorkOpen(false)}>×</button>
           </div>
-
-          <div className="my-work-search">
-            <span>⌕</span>
-            <input placeholder="Search your work" />
-          </div>
-
+          <div className="my-work-search"><span>⌕</span><input placeholder="Search your work" /></div>
           <div className="my-work-actions-row">
-            <button type="button" onClick={saveCurrentToMyWork}>＋ Save current</button>
+            <button type="button" onClick={saveToDailyWork}>＋ Save current</button>
             <button type="button" onClick={() => setMyWorkItems([])}>Clear</button>
           </div>
-
           <div className="my-work-section-title">RECENT WORK</div>
-
           <div className="my-work-list">
             {myWorkItems.length === 0 ? (
               <div className="my-work-empty">
@@ -1426,6 +1258,35 @@ function App() {
   };
 
   // ============================================================
+  // DATA ANALYSIS SIDEBAR
+  // ============================================================
+
+  const renderAnalysis = () => {
+    if (!analysisOpen || !analysis) return null;
+    return (
+      <aside className="analysis-sidebar">
+        <div className="analysis-header">
+          <h3>📈 Data Analysis</h3>
+          <button onClick={() => setAnalysisOpen(false)}>×</button>
+        </div>
+        <div className="analysis-stat-row">
+          <div className="analysis-stat"><span>Rows</span><strong>{analysis.row_count}</strong></div>
+          <div className="analysis-stat"><span>Columns</span><strong>{analysis.column_count}</strong></div>
+        </div>
+        {Object.entries(analysis.numeric_columns || {}).map(([col, stats]) => (
+          <div key={col} className="analysis-section">
+            <h4>💰 {col}</h4>
+            <div className="analysis-stat"><span>Total</span><strong>₹{Number(stats.total).toLocaleString()}</strong></div>
+            <div className="analysis-stat"><span>Average</span><strong>₹{Number(stats.average).toLocaleString()}</strong></div>
+            <div className="analysis-stat"><span>Max</span><strong>₹{Number(stats.max).toLocaleString()}</strong></div>
+            <div className="analysis-stat"><span>Min</span><strong>₹{Number(stats.min).toLocaleString()}</strong></div>
+          </div>
+        ))}
+      </aside>
+    );
+  };
+
+  // ============================================================
   // SCREEN: WORKSPACE
   // ============================================================
 
@@ -1439,13 +1300,13 @@ function App() {
           <span className="header-divider">/</span>
           <span>Excel</span>
         </div>
-
         <div className="workspace-actions">
           <button type="button" onClick={startNewChat}>＋ New chat</button>
-          <button type="button" onClick={() => setMyWorkOpen(true)}>Daily Work</button>
-          <button type="button" onClick={saveCurrentToMyWork}>Save</button>
+          <button type="button" onClick={() => setMyWorkOpen(true)}>📅 Daily Work</button>
+          <button type="button" onClick={saveToDailyWork}>💾 Save</button>
           <button type="button" onClick={downloadWorkbook}>⬇ Download</button>
           <button type="button" onClick={saveToCompanyFolder}>📁 Save to folder</button>
+          <button type="button" onClick={() => { setAnalysisOpen(true); if (sessionId) refreshAnalysis(sessionId); }} title="Data Analysis">📈</button>
           <button className="workspace-more-button" type="button" title="Options" onClick={() => setOptionsOpen((v) => !v)}>⋮</button>
           <div className="avatar">N</div>
         </div>
@@ -1457,10 +1318,7 @@ function App() {
             <div className="chat-header">
               <div className="orbit-agent">
                 <div className="agent-avatar">O</div>
-                <div>
-                  <strong>Orbit</strong>
-                  <span>Excel agent</span>
-                </div>
+                <div><strong>Orbit</strong><span>Excel agent</span></div>
               </div>
               <div className="agent-status">
                 <span className={`status-dot ${processing ? "working-dot" : ""}`} />
@@ -1480,9 +1338,7 @@ function App() {
             </div>
             <div className="right-topbar-actions">
               <span className="work-status-text">{processing ? "Orbit is working…" : workStatus}</span>
-              {fullScreen && (
-                <button className="exit-fullscreen-btn" onClick={() => setFullScreen(false)}>✕ Exit full screen</button>
-              )}
+              {fullScreen && <button className="exit-fullscreen-btn" onClick={() => setFullScreen(false)}>✕ Exit full screen</button>}
             </div>
           </div>
 
@@ -1493,25 +1349,20 @@ function App() {
                 <span className="doc-confidence">{Math.round((documentInfo.confidence || 0) * 100)}% confidence</span>
               </div>
               <table className="doc-fields-table">
-                <thead>
-                  <tr><th>Field</th><th>Value</th></tr>
-                </thead>
+                <thead><tr><th>Field</th><th>Value</th></tr></thead>
                 <tbody>
                   {Object.entries(documentInfo.fields).map(([key, value]) => (
-                    <tr key={key}>
-                      <td className="doc-field-name">{key}</td>
-                      <td className="doc-field-value">{String(value)}</td>
-                    </tr>
+                    <tr key={key}><td className="doc-field-name">{key}</td><td className="doc-field-value">{String(value)}</td></tr>
                   ))}
                 </tbody>
               </table>
             </div>
           )}
 
-          <div className="right-content workbook-only-content">
-            {renderSpreadsheet()}
-          </div>
+          <div className="right-content workbook-only-content">{renderSpreadsheet()}</div>
         </main>
+
+        {renderAnalysis()}
 
         {optionsOpen && (
           <div className="options-overlay" onClick={() => setOptionsOpen(false)}>
@@ -1520,7 +1371,6 @@ function App() {
                 <strong>Display options</strong>
                 <button onClick={() => setOptionsOpen(false)}>×</button>
               </div>
-
               <div className="options-group">
                 <span className="options-label">Layout</span>
                 <div className="options-row">
@@ -1528,7 +1378,6 @@ function App() {
                   <button className={fullScreen ? "active" : ""} onClick={() => setFullScreen(true)}>⛶ Full</button>
                 </div>
               </div>
-
               <div className="options-group">
                 <span className="options-label">Text size</span>
                 <div className="options-row">
@@ -1537,7 +1386,6 @@ function App() {
                   <button className={textSize === "large" ? "active" : ""} onClick={() => setTextSize("large")}>L</button>
                 </div>
               </div>
-
               <div className="options-group">
                 <span className="options-label">Align</span>
                 <div className="options-row">
@@ -1552,12 +1400,48 @@ function App() {
       </div>
 
       {renderMyWork()}
+
+      {newSheetModalOpen && (
+        <div className="modal-overlay" onClick={() => setNewSheetModalOpen(false)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <h3>Create new sheet</h3>
+            <p>Enter a name for the new sheet:</p>
+            <input
+              type="text"
+              className="modal-input"
+              value={newSheetName}
+              onChange={(e) => setNewSheetName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") confirmCreateSheet();
+                if (e.key === "Escape") setNewSheetModalOpen(false);
+              }}
+              autoFocus
+            />
+            <div className="modal-actions">
+              <button onClick={() => setNewSheetModalOpen(false)}>Cancel</button>
+              <button className="primary" onClick={confirmCreateSheet}>Create</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 
   // ============================================================
-  // ROUTER (with auth gate)
+  // ROUTER
   // ============================================================
+
+  if (isResetRoute) {
+    return (
+      <ResetPasswordScreen
+        onDone={() => {
+          window.history.replaceState({}, "", "/");
+          setIsResetRoute(false);
+          supabase.auth.signOut();
+        }}
+      />
+    );
+  }
 
   if (checkingAuth) {
     return (
@@ -1567,11 +1451,11 @@ function App() {
     );
   }
 
-  if (!session) {
-    return <LoginScreen onLogin={handleLogin} />;
-  }
+  if (!session) return <LoginScreen onLogin={handleLogin} />;
+  if (!acceptedTerms) return <TermsScreen onAccept={handleAcceptTerms} />;
 
   if (screen === "home") return renderHome();
+  if (screen === "account") return renderAccount();
   if (screen === "excel") return renderExcelStart();
   if (screen === "excel-chat") return renderExcelChat();
   if (screen === "excel-workspace") return renderExcelWorkspace();

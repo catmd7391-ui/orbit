@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from session_store import (
     create_session, get_session, add_message, add_file,
     set_document_context, set_agent_result, save_to_folder,
+    update_session,
 )
 from file_processor import save_uploaded_file
 from universal_file_reader import read_any_file
@@ -34,9 +35,8 @@ from workbook_store import safe_save
 from excel_tool import set_cloud_context
 
 
-app = FastAPI(title="Orbit Backend", version="10.0")
+app = FastAPI(title="Orbit Backend", version="10.1")
 
-# ⬇️ CORS — permissive for testing (allows any origin)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -48,7 +48,7 @@ app.add_middleware(
 
 @app.get("/")
 def root():
-    return {"status": "online", "service": "Orbit", "version": "10.0"}
+    return {"status": "online", "service": "Orbit", "version": "10.1"}
 
 
 @app.get("/brain/status")
@@ -76,10 +76,14 @@ def read_workbook(session, preferred_sheet=None):
         from openpyxl.utils import get_column_letter
 
         wb = load_workbook(path)
+        active_from_session = session.get("active_sheet")
+
         if preferred_sheet and preferred_sheet in wb.sheetnames:
             ws = wb[preferred_sheet]
+        elif active_from_session and active_from_session in wb.sheetnames:
+            ws = wb[active_from_session]
         elif wb.sheetnames:
-            ws = wb[wb.sheetnames[-1]]
+            ws = wb[wb.sheetnames[0]]
         else:
             ws = wb.active
 
@@ -205,6 +209,8 @@ def create_excel_session(workbook: dict):
     try:
         sid = create_session(workbook)
         session = get_session(sid)
+        default_sheet = (workbook.get("sheets") or ["Sheet1"])[0]
+        update_session(sid, {"active_sheet": default_sheet})
         return {"success": True, "session_id": sid, "workbook": read_workbook(session)}
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -223,7 +229,22 @@ def read_excel_session(session_id: str):
         "document_analysis": session.get("last_document_analysis"),
         "agent_result": session.get("last_agent_result"),
         "company_folders": session.get("company_folders", {}),
+        "active_sheet": session.get("active_sheet", "Sheet1"),
     }
+
+
+# ============================================================
+# SET ACTIVE SHEET
+# ============================================================
+
+@app.post("/excel/session/{session_id}/set-active-sheet")
+def set_active_sheet_endpoint(session_id: str, sheet_name: str = Form(...)):
+    session = get_session(session_id)
+    if not session:
+        return {"success": False, "error": "Session not found"}
+    update_session(session_id, {"active_sheet": sheet_name})
+    print(f"[main] ✅ Active sheet set to: {sheet_name}")
+    return {"success": True, "active_sheet": sheet_name}
 
 
 # ============================================================
@@ -283,6 +304,83 @@ def read_single_sheet(session_id: str, sheet_name: str):
 
     except Exception as e:
         print("read_single_sheet error:", e)
+        return {"success": False, "error": str(e)}
+
+
+# ============================================================
+# ANALYSIS
+# ============================================================
+
+@app.get("/excel/session/{session_id}/analysis")
+def analyze_workbook(session_id: str, sheet_name: Optional[str] = None):
+    session = get_session(session_id)
+    if not session:
+        return {"success": False, "error": "Session not found"}
+
+    path = session.get("workbook_path")
+    if not path or not os.path.exists(path):
+        return {"success": False, "error": "Workbook not found"}
+
+    active = sheet_name or session.get("active_sheet", "Sheet1")
+
+    try:
+        from openpyxl import load_workbook
+        wb = load_workbook(path)
+        if active not in wb.sheetnames:
+            active = wb.sheetnames[0] if wb.sheetnames else "Sheet1"
+        ws = wb[active]
+
+        columns = []
+        for c in range(1, ws.max_column + 1):
+            v = ws.cell(row=1, column=c).value
+            if v:
+                columns.append(str(v))
+
+        rows = []
+        for r in range(2, ws.max_row + 1):
+            row = []
+            for c in range(1, len(columns) + 1):
+                row.append(ws.cell(row=r, column=c).value)
+            if any(v is not None for v in row):
+                rows.append(row)
+
+        analysis = {
+            "sheet_name": active,
+            "row_count": len(rows),
+            "column_count": len(columns),
+            "columns": columns,
+            "numeric_columns": {},
+            "text_columns": [],
+            "warnings": [],
+        }
+
+        for col_idx, col_name in enumerate(columns):
+            values = [row[col_idx] for row in rows if row[col_idx] is not None]
+            if not values:
+                continue
+
+            numeric = [v for v in values if isinstance(v, (int, float))]
+            if numeric and len(numeric) >= len(values) * 0.7:
+                analysis["numeric_columns"][col_name] = {
+                    "total": sum(numeric),
+                    "average": sum(numeric) / len(numeric),
+                    "min": min(numeric),
+                    "max": max(numeric),
+                    "count": len(numeric),
+                }
+            else:
+                counts = {}
+                for v in values:
+                    if v is not None:
+                        key = str(v)[:30]
+                        counts[key] = counts.get(key, 0) + 1
+                top = sorted(counts.items(), key=lambda x: -x[1])[:5]
+                analysis["text_columns"].append({"name": col_name, "top_values": top})
+
+        return {"success": True, "analysis": analysis}
+
+    except Exception as e:
+        print("analysis error:", e)
         return {"success": False, "error": str(e)}
 
 
@@ -357,32 +455,17 @@ async def quick_calc_endpoint(session_id: str, message: str = Form(...)):
                 values.append(v)
 
         if not values:
-            return {
-                "success": False,
-                "message": f"No numbers found in column '{col_name}'",
-            }
+            return {"success": False, "message": f"No numbers found in column '{col_name}'"}
 
-        fn_map = {
-            "sum": "SUM",
-            "average": "AVERAGE",
-            "count": "COUNT",
-            "max": "MAX",
-            "min": "MIN",
-        }
+        fn_map = {"sum": "SUM", "average": "AVERAGE", "count": "COUNT", "max": "MAX", "min": "MIN"}
         formula = f"={fn_map[op]}({range_str})"
 
-        if op == "sum":
-            result = sum(values)
-        elif op == "average":
-            result = sum(values) / len(values)
-        elif op == "count":
-            result = len(values)
-        elif op == "max":
-            result = max(values)
-        elif op == "min":
-            result = min(values)
-        else:
-            return {"success": False, "fallback": True}
+        if op == "sum": result = sum(values)
+        elif op == "average": result = sum(values) / len(values)
+        elif op == "count": result = len(values)
+        elif op == "max": result = max(values)
+        elif op == "min": result = min(values)
+        else: return {"success": False, "fallback": True}
 
         target_row = last_row + 1
         label_col = col_idx - 1 if col_idx > 1 else col_idx
@@ -390,11 +473,7 @@ async def quick_calc_endpoint(session_id: str, message: str = Form(...)):
             ws.cell(row=target_row, column=label_col).value = op.capitalize()
         ws.cell(row=target_row, column=col_idx).value = formula
 
-        safe_save(
-            wb, path,
-            session_id=session_id,
-            filename=session.get("workbook_name"),
-        )
+        safe_save(wb, path, session_id=session_id, filename=session.get("workbook_name"))
 
         print(f"[main] quick_calc op={op} col={col_name} range={range_str} value={result}")
 
@@ -413,7 +492,7 @@ async def quick_calc_endpoint(session_id: str, message: str = Form(...)):
 
 
 # ============================================================
-# DOWNLOAD WORKBOOK (with cloud fallback)
+# DOWNLOAD WORKBOOK
 # ============================================================
 
 @app.get("/excel/session/{session_id}/download")
@@ -453,11 +532,7 @@ def download_workbook(session_id: str):
 # ============================================================
 
 @app.post("/excel/session/{session_id}/save-to-folder")
-def save_to_company_folder(
-    session_id: str,
-    folder: str = Form("Data"),
-    filename: str = Form(""),
-):
+def save_to_company_folder(session_id: str, folder: str = Form("Data"), filename: str = Form("")):
     session = get_session(session_id)
     if not session:
         return {"success": False, "error": "Session not found"}
@@ -476,11 +551,7 @@ def save_to_company_folder(
 # ============================================================
 
 @app.post("/excel/session/{session_id}/plan")
-async def plan_task(
-    session_id: str,
-    message: str = Form(""),
-    file: Optional[UploadFile] = File(None),
-):
+async def plan_task(session_id: str, message: str = Form(""), file: Optional[UploadFile] = File(None)):
     session = get_session(session_id)
     if not session:
         return {"success": False, "error": "Session not found"}
@@ -491,6 +562,7 @@ async def plan_task(
     print("PLAN REQUEST  session:", session_id)
     print("MESSAGE:", message)
     print("FILE:", file.filename if file else "None")
+    print("ACTIVE SHEET:", session.get("active_sheet", "Sheet1"))
     print("WORKBOOK:", session.get("workbook_path"))
     print("#" * 70)
 
@@ -512,11 +584,7 @@ async def plan_task(
 
             read_result = read_any_file(uploaded["path"])
             if not read_result.get("success") or not read_result.get("text"):
-                return {
-                    "success": False,
-                    "status": "error",
-                    "message": f"Could not read file: {read_result.get('error')}",
-                }
+                return {"success": False, "status": "error", "message": f"Could not read file: {read_result.get('error')}"}
 
             document = {
                 "has_text": True,
@@ -526,32 +594,19 @@ async def plan_task(
                 "file_type": read_result.get("type"),
             }
 
-            classification = classify_document(
-                read_result["text"], filename=uploaded["filename"]
-            )
+            classification = classify_document(read_result["text"], filename=uploaded["filename"])
             doc_type = classification.get("type", "generic")
 
-            print(
-                f"[main] Classified '{uploaded['filename']}' as: {doc_type} "
-                f"(confidence={classification.get('confidence')})"
-            )
+            print(f"[main] Classified '{uploaded['filename']}' as: {doc_type} (confidence={classification.get('confidence')})")
 
             if doc_type == "invoice":
-                analysis = extract_invoice(
-                    read_result["text"], filename=uploaded["filename"]
-                )
+                analysis = extract_invoice(read_result["text"], filename=uploaded["filename"])
                 print(f"[main] Invoice extractor used. Success={analysis.get('success')}")
             else:
-                analysis = analyze_any_pdf(
-                    read_result["text"], filename=uploaded["filename"]
-                )
+                analysis = analyze_any_pdf(read_result["text"], filename=uploaded["filename"])
 
             if not analysis.get("success"):
-                return {
-                    "success": False,
-                    "status": "error",
-                    "message": f"Could not analyze file: {analysis.get('error')}",
-                }
+                return {"success": False, "status": "error", "message": f"Could not analyze file: {analysis.get('error')}"}
 
             set_document_context(session_id, document, analysis, uploaded)
             add_document(session_id, uploaded["filename"], read_result["text"], analysis)
@@ -579,37 +634,20 @@ async def plan_task(
     if is_plain_chat(message):
         reply = ask_ai(build_chat_prompt(message, session))
         add_message(session_id, "assistant", reply)
-        return {
-            "success": True,
-            "action": "conversation",
-            "status": "completed",
-            "message": reply,
-        }
+        return {"success": True, "action": "conversation", "status": "completed", "message": reply}
 
     print("\n--- BUILDING PLAN ---")
     set_workbook_path(session["workbook_path"])
 
-    built = await asyncio.to_thread(
-        build_plan_for_task, message, session["workbook_path"], session
-    )
+    built = await asyncio.to_thread(build_plan_for_task, message, session["workbook_path"], session)
 
     if not built.get("success"):
-        return {
-            "success": False,
-            "status": "error",
-            "message": built.get("message", "Could not build a plan."),
-        }
+        return {"success": False, "status": "error", "message": built.get("message", "Could not build a plan.")}
 
     if built.get("already_satisfied"):
-        return {
-            "success": True,
-            "already_satisfied": True,
-            "summary": built.get("summary", "Already done."),
-        }
+        return {"success": True, "already_satisfied": True, "summary": built.get("summary", "Already done.")}
 
-    pid = create_permission_request(
-        session_id, built["plan"], built["summary"], message
-    )
+    pid = create_permission_request(session_id, built["plan"], built["summary"], message)
 
     return {
         "success": True,
@@ -650,11 +688,7 @@ async def approve_plan(permission_id: str):
     set_cloud_context(session_id, session.get("workbook_name"))
 
     exec_result = await asyncio.to_thread(
-        execute_approved_plan,
-        plan,
-        session["workbook_path"],
-        session_id,
-        session.get("workbook_name"),
+        execute_approved_plan, plan, session["workbook_path"], session_id, session.get("workbook_name"),
     )
 
     preferred_sheet = None
@@ -664,6 +698,10 @@ async def approve_plan(permission_id: str):
             preferred_sheet = s
             break
 
+    if preferred_sheet:
+        update_session(session_id, {"active_sheet": preferred_sheet})
+
+    session = get_session(session_id)
     workbook = read_workbook(session, preferred_sheet=preferred_sheet)
     set_agent_result(session_id, exec_result)
 
@@ -692,6 +730,7 @@ async def approve_plan(permission_id: str):
         "workbook": workbook,
         "steps": steps,
         "executed_steps": exec_result.get("executed_steps", []),
+        "active_sheet": preferred_sheet or session.get("active_sheet"),
     }
 
 
@@ -705,11 +744,7 @@ def reject_plan(permission_id: str):
     if not req:
         return {"success": False, "error": "Permission not found"}
     reject_permission(permission_id)
-    return {
-        "success": True,
-        "status": "rejected",
-        "message": "You rejected the plan. Nothing was changed.",
-    }
+    return {"success": True, "status": "rejected", "message": "You rejected the plan. Nothing was changed."}
 
 
 if __name__ == "__main__":
